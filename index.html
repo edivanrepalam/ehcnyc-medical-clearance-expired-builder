@@ -230,6 +230,15 @@ button{font:inherit}
       <div class="field"><label>Breakdown of the total for your order + medical consultation fee</label><textarea data-k="comments" placeholder="Enter the breakdown of the total for the order and medical consultation fee"></textarea></div>
     </div>
 
+    <div class="card glass">
+      <div class="card-head"><h2>To remit payment</h2></div>
+      <div class="grid">
+        <div class="field span-3"><label>To remit payment</label><select data-k="remit" data-opts="remitOptions" data-ph="Select"></select></div>
+        <div class="field span-3 remit-link-field" hidden><label>Payment link <span class="req">*</span></label><input data-k="payLink" type="url" placeholder="https://" autocomplete="off"></div>
+        <div class="field remit-card-field" hidden><label>Card ending in <span class="req">*</span></label><input data-k="cardLast4" inputmode="numeric" placeholder="0000" autocomplete="off"></div>
+      </div>
+    </div>
+
   </section>
 
   <aside class="preview-col">
@@ -411,6 +420,14 @@ const CONFIG = {
   shippingMethods: ['FedEx', 'UPS cold-pack', 'FedEx cold-pack', 'USPS'],
   signatureTypes: ['No signature ($0.00)', 'Indirect Signature ($6.50)', 'Direct Signature ($7.50)'],
   shipmentTypes: ['1 ($35.00)', '2 ($70.00)', '3 ($105.00)', '4 ($140.00)', '5 ($175.00)', '6 ($210.00)'],
+  // "To remit payment" dropdown: [0] shows a payment-link button, [1] shows the card sentence + a reply button ("_______" = the last 4 digits)
+  remitOptions: [
+    'Please click on the link below to remit payment.',
+    'Please confirm we can process payment using your card ending in _______.'
+  ],
+  remitButtonText: 'Click here to remit payment',
+  replyButtonText: 'Click here to reply',
+  replySubject: 're: Medical clearance expired - payment confirmation',
   medicalConsultationFees: ['$0.00', '$45.00', '$60.00', '$100.00', '$200.00'],
   // fields a new product copies from the product above it
   inheritFields: ['orderDate', 'status', 'processing', 'clearedUntil', 'shipMethod'],
@@ -475,6 +492,7 @@ function applyDefaults() {
   $$('[data-k]').forEach(el => { el.value = ''; });
   $$('select[data-opts]').forEach(sel => fillSelect(sel, CONFIG[sel.dataset.opts], sel.dataset.ph));
   setupMedicalProductFields();
+  syncRemit();
   $$('[data-default]').forEach(el => { el.value = CONFIG[el.dataset.default] || ''; });
   $$('.field.invalid').forEach(f => f.classList.remove('invalid'));
   const via = $('#viaMulti');
@@ -518,6 +536,17 @@ function syncMedicalProgram() {
       return `<option value="${esc(p.label)}">${esc(p.label + priceText)}</option>`;
     }).join('');
   program.disabled = options.length === 0;
+}
+
+// "To remit payment": the payment-link box shows for option 1, the card digits box for option 2
+function remitMode() {
+  const v = ($('[data-k=remit]') || {}).value || '';
+  return v === CONFIG.remitOptions[0] ? 'link' : v === CONFIG.remitOptions[1] ? 'card' : '';
+}
+function syncRemit() {
+  const mode = remitMode();
+  $('.remit-link-field').hidden = mode !== 'link';
+  $('.remit-card-field').hidden = mode !== 'card';
 }
 
 function setValues(node, data) {
@@ -1052,6 +1081,22 @@ function button(url, text, filled = true) {
 </td></tr></table></td></tr>`;
 }
 
+// Under the Total bar: the chosen "To remit payment" sentence, then its button
+function remitBlock(s) {
+  const mode = remitMode();
+  if (!mode) return '';
+  const sentence = html => `<tr><td align="center" style="padding:20px 30px 14px;font-family:${F};font-size:15px;line-height:23px;font-weight:600;color:${C.ink};text-align:center;">${html}</td></tr>`;
+  if (mode === 'link') {
+    const url = safeUrl(s.payLink);
+    return sentence(esc(CONFIG.remitOptions[0])) + (url ? button(url, CONFIG.remitButtonText, true) : '');
+  }
+  const digits = /^\d{4}$/.test(s.cardLast4) ? s.cardLast4 : '';
+  const text = esc(CONFIG.remitOptions[1]).replace(/_+/, digits || '_______');
+  const body = `I confirm you can process payment using my card ending in ${digits || '____'}.`;
+  const href = `mailto:${CONFIG.signature.email}?subject=${encodeURIComponent(CONFIG.replySubject)}&body=${encodeURIComponent(body)}`;
+  return sentence(text) + button(href, CONFIG.replyButtonText, true);
+}
+
 function signatureBlock(logoSrc) {
   const S = CONFIG.signature;
   const txt = (size, extra) => `font-family:${F};font-size:${size}px;line-height:${Math.round(size * 1.45)}px;${extra}`;
@@ -1134,7 +1179,7 @@ function buildEmailBody(s) {
 ${heading('Patient information')}
 ${patient}
 
-${totals}
+${totals}${remitBlock(s)}
 ${comments}
 ${signatureBlock(logoSrc)}
 
@@ -1185,6 +1230,23 @@ function render() {
 }
 
 /* ---------- validation / copy / download ---------- */
+// The option chosen under "To remit payment" needs its payment link / card digits (a button with no link would go nowhere)
+function paymentMissing() {
+  const mode = remitMode(), out = [];
+  if (mode === 'link' && !safeUrl($('[data-k=payLink]').value.trim())) out.push({ el: $('[data-k=payLink]'), label: 'payment link' });
+  if (mode === 'card' && !/^\d{4}$/.test($('[data-k=cardLast4]').value.trim())) out.push({ el: $('[data-k=cardLast4]'), label: 'last 4 digits of the card' });
+  return out;
+}
+function blockOnPayment(action) {
+  $$('.field.invalid').forEach(f => f.classList.remove('invalid'));
+  const miss = paymentMissing();
+  if (!miss.length) return false;
+  miss.forEach(m => m.el.closest('.field').classList.add('invalid'));
+  toast('Add the ' + joinList(miss.map(m => m.label)) + ' before ' + action, true);
+  miss[0].el.closest('.field').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  return true;
+}
+
 function validate() {
   $$('.field.invalid').forEach(f => f.classList.remove('invalid'));
   const miss = [];
@@ -1193,6 +1255,7 @@ function validate() {
     name.closest('.field').classList.add('invalid');
     miss.push('Name');
   }
+  paymentMissing().forEach(m => { m.el.closest('.field').classList.add('invalid'); miss.push(m.label); });
 
   return miss;
 }
@@ -1261,11 +1324,13 @@ $('#copyGmail').addEventListener('click', async () => {
 });
 
 $('#copyCode').addEventListener('click', async () => {
+  if (blockOnPayment('copying')) return;
   const ok = await copyText(buildEmailDoc(readState()));
   toast(ok ? 'HTML code copied' : 'Copy was blocked. Use the download button instead.', !ok);
 });
 
 $('#download').addEventListener('click', () => {
+  if (blockOnPayment('downloading')) return;
   const s = readState();
   const blob = new Blob([buildEmailDoc(s)], { type: 'text/html' });
   const a = document.createElement('a');
@@ -1292,6 +1357,10 @@ $$('.device button').forEach(b => b.addEventListener('click', () => {
 /* ---------- live updates ---------- */
 const formCol = $('.form-col');
 formCol.addEventListener('input', e => {
+  if (e.target.matches('[data-k=cardLast4]')) {   // digits only, 4 max; a pasted card number keeps its last 4
+    const d = e.target.value.replace(/\D/g, '');
+    e.target.value = e.inputType === 'insertFromPaste' ? d.slice(-4) : d.slice(0, 4);
+  }
   const f = e.target.closest('.field');
   if (f) f.classList.remove('invalid');
   render();
@@ -1300,6 +1369,7 @@ formCol.addEventListener('change', e => {
   const multi = e.target.closest('.multi');
   if (multi) syncMulti(multi);
   if (e.target.matches('[data-k=medication]')) syncMedicalProgram();
+  if (e.target.matches('[data-k=remit]')) syncRemit();
   render();
 });
 
