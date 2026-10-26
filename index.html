@@ -216,9 +216,8 @@ button{font:inherit}
         </div>
         </div>
         <div class="field"><label>Sale / Promotion</label><input data-k="promo" placeholder="n/a"></div>
+        <div class="field"><label>Discount code</label><input data-k="discount" placeholder="n/a" autocomplete="off"></div>
         <div class="field"><label>Total</label><div class="money"><span>$</span><input data-k="totalPaid" class="calc" type="text" readonly placeholder="0.00" title="Medication/program price + shipment total + signature fee per shipment + medical consultation fee"></div></div>
-        <div class="field"><label>Medication Owed?</label><select data-k="medOwed" data-opts="medicationOwedOptions"></select></div>
-        <div class="field span-3 owed-medication-field" hidden><label>Owed Medication</label><input data-k="owedMed" placeholder="Shipment #2, #3, etc."></div>
       </div>
     </div>
 
@@ -413,7 +412,6 @@ const CONFIG = {
   signatureTypes: ['No signature ($0.00)', 'Indirect Signature ($6.50)', 'Direct Signature ($7.50)'],
   shipmentTypes: ['1 ($35.00)', '2 ($70.00)', '3 ($105.00)', '4 ($140.00)', '5 ($175.00)', '6 ($210.00)'],
   medicalConsultationFees: ['$0.00', '$45.00', '$60.00', '$100.00', '$200.00'],
-  medicationOwedOptions: ['No', 'Yes'],
   // fields a new product copies from the product above it
   inheritFields: ['orderDate', 'status', 'processing', 'clearedUntil', 'shipMethod'],
   signature: {
@@ -477,7 +475,6 @@ function applyDefaults() {
   $$('[data-k]').forEach(el => { el.value = ''; });
   $$('select[data-opts]').forEach(sel => fillSelect(sel, CONFIG[sel.dataset.opts], sel.dataset.ph));
   setupMedicalProductFields();
-  syncStandaloneMedicationOwed();
   $$('[data-default]').forEach(el => { el.value = CONFIG[el.dataset.default] || ''; });
   $$('.field.invalid').forEach(f => f.classList.remove('invalid'));
   const via = $('#viaMulti');
@@ -521,25 +518,6 @@ function syncMedicalProgram() {
       return `<option value="${esc(p.label)}">${esc(p.label + priceText)}</option>`;
     }).join('');
   program.disabled = options.length === 0;
-}
-
-function syncStandaloneMedicationOwed() {
-  const owed = $('[data-k=medOwed]');
-  const field = $('.owed-medication-field');
-  const input = $('[data-k=owedMed]');
-  if (!owed || !field || !input) return;
-
-  const show = owed.value === 'Yes';
-  field.hidden = !show;
-
-  if (!show) {
-    input.value = '';
-    input.required = false;
-    input.removeAttribute('aria-required');
-  } else {
-    input.required = true;
-    input.setAttribute('aria-required', 'true');
-  }
 }
 
 function setValues(node, data) {
@@ -1074,21 +1052,6 @@ function button(url, text, filled = true) {
 </td></tr></table></td></tr>`;
 }
 
-function treatmentNotice() {
-  const reminders = [
-    'You are taking a new medication',
-    'You have a new medical condition',
-    'If you have a new allergy',
-    'If you plan on having a procedure or surgery',
-    '(Females) If you plan on getting pregnant',
-    'If you experience any side effects.'
-  ];
-  return spacer(20) + panel(`<tr><td style="padding:16px;font-family:${F};font-size:14px;line-height:21px;color:${C.ink};">
-<p style="margin:0;"><strong style="color:${C.danger};font-weight:700;">Important!</strong> During your treatment, please let us know if you:</p>
-<ul style="margin:10px 0 0;padding:0 0 0 20px;">${reminders.map((text, i) => `<li style="margin:0 0 ${i === reminders.length - 1 ? 0 : 6}px;padding:0;">${esc(text)}</li>`).join('')}</ul>
-</td></tr>`);
-}
-
 function signatureBlock(logoSrc) {
   const S = CONFIG.signature;
   const txt = (size, extra) => `font-family:${F};font-size:${size}px;line-height:${Math.round(size * 1.45)}px;${extra}`;
@@ -1129,9 +1092,8 @@ function buildEmailBody(s) {
     ['Shipping address', s.address ? nl2br(s.address) : '', true],
     ['Medication / Product', s.medicationName ? esc(s.medicationName) + (s.medicationTag === COOL_DRY ? '<div>' + tagPill(s.medicationTag) + '</div>' : '') : '', true],
     ['Program (mL / mg)', s.program],
-    ['Medication Owed?', s.medOwed],
-    ...(s.medOwed === 'Yes' ? [['Owed Medication', s.owedMed]] : []),
-    ['Sale / promotion', s.promo || 'n/a']
+    ['Sale / promotion', s.promo || 'n/a'],
+    ['Discount code', s.discount || 'n/a']
   ]);
   // every dollar amount lives here, with the Total as the closing bar
   const breakdown = kvPanel([
@@ -1173,7 +1135,6 @@ ${heading('Patient information')}
 ${patient}
 
 ${totals}
-${treatmentNotice()}
 ${comments}
 ${signatureBlock(logoSrc)}
 
@@ -1231,13 +1192,6 @@ function validate() {
   if (!name.value.trim()) {
     name.closest('.field').classList.add('invalid');
     miss.push('Name');
-  }
-
-  const medOwed = $('[data-k=medOwed]');
-  const owedMed = $('[data-k=owedMed]');
-  if (medOwed && medOwed.value === 'Yes' && owedMed && !owedMed.value.trim()) {
-    owedMed.closest('.field').classList.add('invalid');
-    miss.push('Owed Medication');
   }
 
   return miss;
@@ -1346,7 +1300,6 @@ formCol.addEventListener('change', e => {
   const multi = e.target.closest('.multi');
   if (multi) syncMulti(multi);
   if (e.target.matches('[data-k=medication]')) syncMedicalProgram();
-  if (e.target.matches('[data-k=medOwed]')) syncStandaloneMedicationOwed();
   render();
 });
 
